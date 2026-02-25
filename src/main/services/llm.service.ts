@@ -276,20 +276,12 @@ export class LLMService {
     }
 
     try {
-      let jsonString = response.content;
+      let jsonString = response.content.trim();
 
+      // Strip markdown code blocks if present
       const jsonMatch = jsonString.match(/```(?:json)?\s*([\s\S]*?)```/);
       if (jsonMatch) {
         jsonString = jsonMatch[1].trim();
-      }
-
-      const jsonObjectMatch = jsonString.match(/\{[\s\S]*\}/);
-      const jsonArrayMatch = jsonString.match(/\[[\s\S]*\]/);
-
-      if (jsonObjectMatch) {
-        jsonString = jsonObjectMatch[0];
-      } else if (jsonArrayMatch) {
-        jsonString = jsonArrayMatch[0];
       }
 
       const data = parseResponse

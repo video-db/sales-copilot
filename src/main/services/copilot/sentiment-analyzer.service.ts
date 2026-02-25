@@ -121,12 +121,90 @@ export class SentimentAnalyzerService {
   }
 
   /**
-   * Analyze sentiment using LLM for ambiguous cases
+   * Analyze sentiment of multiple statements using LLM (batch analysis)
+   * More efficient than analyzing one at a time
+   */
+  async analyzeBatchWithLLM(statements: Array<{ id: string; text: string; time: number }>): Promise<Map<string, SentimentResult>> {
+    const llm = getLLMService();
+    const results = new Map<string, SentimentResult>();
+
+    if (statements.length === 0) {
+      return results;
+    }
+
+    const statementsText = statements
+      .map((s, i) => `[${i + 1}] "${s.text}"`)
+      .join('\n');
+
+    const prompt = `Analyze the sentiment of each customer statement from a sales call.
+Consider the emotional tone, concerns, satisfaction, and engagement level.
+Statements like "this is bad", "killing myself", "hate this" are clearly NEGATIVE.
+Statements showing interest, agreement, or positivity are POSITIVE.
+
+Statements:
+${statementsText}
+
+Respond with JSON array (one entry per statement, in order):
+[
+  {
+    "index": 1,
+    "sentiment": "positive" | "neutral" | "negative",
+    "confidence": 0.0-1.0,
+    "signals": ["key words or phrases that indicate sentiment"]
+  },
+  ...
+]`;
+
+    try {
+      const response = await llm.completeJSON<Array<{
+        index: number;
+        sentiment: Sentiment;
+        confidence: number;
+        signals: string[];
+      }>>(prompt, 'You are a sentiment analysis expert for sales calls. Analyze customer emotions accurately. Return valid JSON array only.');
+
+      if (response.success && response.data && Array.isArray(response.data)) {
+        for (const item of response.data) {
+          const statement = statements[item.index - 1];
+          if (statement) {
+            const result: SentimentResult = {
+              sentiment: item.sentiment || 'neutral',
+              confidence: item.confidence || 0.5,
+              signals: item.signals || [],
+            };
+            results.set(statement.id, result);
+            this.cache.set(statement.id, result.sentiment);
+          }
+        }
+        log.debug({
+          statementCount: statements.length,
+          resultsCount: results.size,
+          sentiments: Array.from(results.values()).map(r => r.sentiment),
+        }, 'LLM batch sentiment analysis completed');
+        return results;
+      }
+    } catch (error) {
+      log.warn({ error }, 'LLM batch sentiment analysis failed, falling back to pattern-based');
+    }
+
+    // Fallback: analyze each with pattern matching
+    for (const statement of statements) {
+      const result = this.analyze(statement.text);
+      results.set(statement.id, result);
+      this.cache.set(statement.id, result.sentiment);
+    }
+    return results;
+  }
+
+  /**
+   * Analyze sentiment using LLM for a single statement
    */
   async analyzeWithLLM(text: string): Promise<SentimentResult> {
     const llm = getLLMService();
 
     const prompt = `Analyze the sentiment of this customer statement in a sales call.
+Consider emotional tone, concerns, frustration, satisfaction level.
+Statements expressing distress, negativity, or complaints are NEGATIVE.
 
 Statement: "${text}"
 
@@ -180,9 +258,10 @@ Respond with JSON:
   }
 
   /**
-   * Get sentiment trend from recent customer segments
+   * Get sentiment trend from recent customer segments (LLM-driven)
+   * Uses batch LLM analysis for accurate sentiment detection
    */
-  getSentimentTrend(segments: TranscriptSegmentData[]): SentimentTrend {
+  async getSentimentTrend(segments: TranscriptSegmentData[]): Promise<SentimentTrend> {
     // Filter to customer ("them") segments only
     const themSegments = segments
       .filter(s => s.isFinal && s.channel === 'them')
@@ -197,21 +276,36 @@ Respond with JSON:
       };
     }
 
-    // Build history
+    // Find segments that need analysis (not in cache)
+    const uncachedSegments = themSegments.filter(s => !this.cache.has(s.id));
+
+    // Batch analyze uncached segments with LLM
+    if (uncachedSegments.length > 0) {
+      const statements = uncachedSegments.map(s => ({
+        id: s.id,
+        text: s.text,
+        time: s.startTime,
+      }));
+      await this.analyzeBatchWithLLM(statements);
+    }
+
+    // Build history from cache
     const history: SentimentTrend['history'] = [];
     let totalScore = 0;
 
     for (const segment of themSegments) {
-      const result = this.analyzeSegment(segment);
+      const cached = this.cache.get(segment.id);
+      const sentiment = cached || 'neutral';
+
       history.push({
         time: segment.startTime,
-        sentiment: result.sentiment,
+        sentiment,
         text: segment.text.substring(0, 100),
       });
 
       // Convert to score
-      if (result.sentiment === 'positive') totalScore += 1;
-      else if (result.sentiment === 'negative') totalScore -= 1;
+      if (sentiment === 'positive') totalScore += 1;
+      else if (sentiment === 'negative') totalScore -= 1;
     }
 
     const averageScore = totalScore / themSegments.length;

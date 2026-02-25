@@ -380,13 +380,14 @@ export class SalesCopilotService extends EventEmitter {
   }
 
   /**
-   * Process sentiment update
+   * Process sentiment update (LLM-driven)
    */
-  private processSentiment(): void {
+  private async processSentiment(): Promise<void> {
     if (!this.callState) return;
 
     const recentSegments = this.transcriptBuffer.getFinalSegments(this.callState.sessionId);
-    const sentiment = this.sentimentAnalyzer.getSentimentTrend(recentSegments);
+    const sentiment = await this.sentimentAnalyzer.getSentimentTrend(recentSegments);
+
 
     this.emit('sentiment-update', { sentiment });
   }
@@ -405,23 +406,9 @@ export class SalesCopilotService extends EventEmitter {
 
     // Check if any tools are available
     const availableTools = toolAggregator.getAllTools();
-    log.info({
-      toolCount: availableTools.length,
-      tools: availableTools.map(t => `${t.serverId}:${t.name}`),
-    }, 'MCP: Available tools');
-
-    if (availableTools.length === 0) {
-      log.warn('MCP: No tools available, skipping intent detection');
-      return;
-    }
 
     // Quick check if we should even trigger the agent
     const shouldTrigger = mcpAgent.shouldTrigger(segment, context);
-    log.info({
-      shouldTrigger,
-      text: segment.text.slice(0, 100),
-      channel: segment.channel,
-    }, 'MCP: Trigger check result');
 
     if (!shouldTrigger) {
       return;
@@ -544,14 +531,14 @@ export class SalesCopilotService extends EventEmitter {
   /**
    * Update metrics and check for nudges
    */
-  private updateMetrics(): void {
+  private async updateMetrics(): Promise<void> {
     if (!this.callState?.isActive) return;
 
     const segments = this.transcriptBuffer.getFinalSegments(this.callState.sessionId);
     const callDuration = (Date.now() - this.callState.startTime) / 1000;
     const metrics = this.metricsService.calculate(segments, callDuration);
     const health = this.metricsService.getConversationHealthScore(metrics);
-    const sentiment = this.sentimentAnalyzer.getSentimentTrend(segments);
+    const sentiment = await this.sentimentAnalyzer.getSentimentTrend(segments);
     const playbookSnapshot = this.playbookTracker.getSnapshot();
 
     // Emit metrics update
@@ -777,7 +764,7 @@ export class SalesCopilotService extends EventEmitter {
   /**
    * Get current sentiment
    */
-  getCurrentSentiment(): SentimentTrend | null {
+  async getCurrentSentiment(): Promise<SentimentTrend | null> {
     if (!this.callState?.isActive) return null;
 
     const segments = this.transcriptBuffer.getFinalSegments(this.callState.sessionId);
