@@ -69,18 +69,6 @@ export class ConversationMetricsService {
     if (meSegments.length > 0) {
       const totalWords = meSegments.reduce((sum, s) => sum + s.text.trim().split(/\s+/).filter(w => w.length > 0).length, 0);
       const totalDuration = meSegments.reduce((sum, s) => sum + (s.endTime - s.startTime), 0);
-      log.info({
-        meSegmentCount: meSegments.length,
-        totalWords,
-        totalDuration,
-        elapsedTimeSeconds,
-        sampleSegment: meSegments[0] ? {
-          text: meSegments[0].text.substring(0, 30),
-          startTime: meSegments[0].startTime,
-          endTime: meSegments[0].endTime,
-          duration: meSegments[0].endTime - meSegments[0].startTime,
-        } : null,
-      }, '[METRICS DEBUG] Me segments for WPM');
     }
 
     const meDuration = this.calculateDuration(meSegments);

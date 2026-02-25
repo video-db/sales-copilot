@@ -74,18 +74,10 @@ export class MCPAgentService {
     return mcpTools.map((tool, index) => {
       const shortName = this.generateShortToolName(tool.serverId, tool.name, index);
 
-      // Store mapping for reverse lookup
       this.toolNameMap.set(shortName, {
         serverId: tool.serverId,
         toolName: tool.name,
       });
-
-      log.debug({
-        shortName,
-        originalServerId: tool.serverId,
-        originalToolName: tool.name,
-        shortNameLength: shortName.length,
-      }, 'Tool name mapping created');
 
       return {
         type: 'function' as const,
@@ -126,7 +118,6 @@ export class MCPAgentService {
   private parseToolName(openAIToolName: string): { serverId: string; toolName: string } | null {
     const mapping = this.toolNameMap.get(openAIToolName);
     if (!mapping) {
-      log.warn({ openAIToolName, availableMappings: Array.from(this.toolNameMap.keys()) }, 'Tool name not found in mapping');
       return null;
     }
 
@@ -165,12 +156,9 @@ export class MCPAgentService {
       log.warn({ arguments: toolCall.function.arguments }, 'Failed to parse tool arguments');
     }
 
-    log.info({ serverId, toolName, input }, 'Executing MCP tool');
 
     try {
       const result = await this.orchestrator.executeTool(serverId, toolName, input);
-
-      log.info({ serverId, toolName, success: result.status === 'success' }, 'Tool execution completed');
 
       return {
         serverId,
@@ -182,7 +170,6 @@ export class MCPAgentService {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      log.error({ serverId, toolName, error: errorMessage }, 'Tool execution failed');
 
       return {
         serverId,
@@ -229,7 +216,6 @@ ${mcpTools.map(t => `- ${t.serverName} (${t.serverId}): ${t.name} - ${t.descript
    * Reset conversation history (call when a new recording/call starts)
    */
   resetConversation(): void {
-    log.info('MCP Agent: Resetting conversation history');
     this.conversationHistory = [];
     this.systemPrompt = null;
   }
@@ -239,7 +225,6 @@ ${mcpTools.map(t => `- ${t.serverName} (${t.serverId}): ${t.name} - ${t.descript
    */
   setCustomTriggerKeywords(keywords: string[]): void {
     this.customTriggerKeywords = keywords.map(k => k.toLowerCase().trim()).filter(Boolean);
-    log.info({ keywordCount: this.customTriggerKeywords.length, keywords: this.customTriggerKeywords }, 'MCP Agent: Custom trigger keywords updated');
   }
 
   /**
@@ -288,15 +273,8 @@ ${mcpTools.map(t => `- ${t.serverName} (${t.serverId}): ${t.name} - ${t.descript
   ): Promise<MCPAgentResult> {
     const latestSegment = recentSegments[recentSegments.length - 1];
 
-    log.info({
-      segmentCount: recentSegments.length,
-      latestText: latestSegment?.text.slice(0, 100),
-      toolCount: mcpTools.length,
-      existingHistoryLength: this.conversationHistory.length,
-    }, 'MCP Agent: Starting agentic loop');
 
     if (mcpTools.length === 0) {
-      log.warn('MCP Agent: No tools available');
       return {
         success: false,
         response: null,
@@ -307,7 +285,6 @@ ${mcpTools.map(t => `- ${t.serverName} (${t.serverId}): ${t.name} - ${t.descript
 
     const llmService = getLLMService();
     if (!llmService) {
-      log.error('MCP Agent: LLM service not available');
       return {
         success: false,
         response: null,
@@ -318,7 +295,6 @@ ${mcpTools.map(t => `- ${t.serverName} (${t.serverId}): ${t.name} - ${t.descript
 
     // Convert MCP tools to OpenAI format
     const tools = this.mcpToolsToOpenAIFormat(mcpTools);
-    log.info({ toolCount: tools.length, toolNames: tools.map(t => t.function.name) }, 'MCP Agent: Converted tools to OpenAI format');
 
     // Initialize or update system prompt
     if (!this.systemPrompt) {
@@ -348,7 +324,6 @@ Based on the conversation above, determine if any tools should be called to fetc
         ...this.conversationHistory.slice(0, keepStart),
         ...this.conversationHistory.slice(-keepEnd),
       ];
-      log.info({ newLength: this.conversationHistory.length }, 'MCP Agent: Trimmed conversation history');
     }
 
     // Build messages array with system prompt + conversation history
@@ -362,44 +337,9 @@ Based on the conversation above, determine if any tools should be called to fetc
 
     // Agentic loop - keep calling tools until we get a text response
     while (iterations < MAX_TOOL_CALLS) {
-      iterations++;
+      iterations++
 
-      log.info({
-        iteration: iterations,
-        messageCount: messages.length,
-        historyLength: this.conversationHistory.length,
-        lastMessageRole: messages[messages.length - 1]?.role,
-        toolCount: tools.length,
-      }, 'MCP Agent: Loop iteration starting');
-
-      log.debug({
-        iteration: iterations,
-        messages: messages.map(m => ({
-          role: m.role,
-          contentLength: m.content?.length || 0,
-          hasToolCalls: !!m.tool_calls,
-          toolCallId: m.tool_call_id,
-        })),
-      }, 'MCP Agent: Messages being sent to LLM');
-
-      log.info({
-        toolCount: tools.length,
-        toolNames: tools.map(t => t.function.name),
-      }, 'MCP Agent: Calling LLM with tools...');
-
-      const llmStartTime = Date.now();
       const response = await llmService.chatCompletionWithTools(messages, tools);
-      const llmElapsedMs = Date.now() - llmStartTime;
-      log.info({
-        success: response.success,
-        hasContent: !!response.content,
-        contentPreview: response.content?.slice(0, 200),
-        toolCallCount: response.tool_calls?.length || 0,
-        toolCallNames: response.tool_calls?.map(tc => tc.function.name),
-        finishReason: response.finishReason,
-        llmElapsedMs,
-        error: response.error,
-      }, 'MCP Agent: LLM response received');
 
       if (!response.success) {
         return {
@@ -412,7 +352,6 @@ Based on the conversation above, determine if any tools should be called to fetc
 
       // Check if we got tool calls
       if (response.tool_calls && response.tool_calls.length > 0) {
-        log.info({ toolCallCount: response.tool_calls.length }, 'LLM requested tool calls');
 
         // Add assistant message with tool calls to messages and history
         const assistantMessage: ChatMessage = {
@@ -426,25 +365,10 @@ Based on the conversation above, determine if any tools should be called to fetc
         // Execute each tool call
         for (let i = 0; i < response.tool_calls.length; i++) {
           const toolCall = response.tool_calls[i];
-          log.info({
-            toolCallIndex: i + 1,
-            totalToolCalls: response.tool_calls.length,
-            toolName: toolCall.function.name,
-            toolCallId: toolCall.id,
-            arguments: toolCall.function.arguments,
-          }, 'MCP Agent: Executing tool call');
 
           const toolStartTime = Date.now();
           const result = await this.executeToolCall(toolCall);
           const toolElapsedMs = Date.now() - toolStartTime;
-
-          log.info({
-            toolName: toolCall.function.name,
-            success: result.success,
-            toolElapsedMs,
-            outputPreview: result.output ? JSON.stringify(result.output).slice(0, 200) : null,
-            error: result.error,
-          }, 'MCP Agent: Tool call completed');
 
           toolsCalled.push(result);
 
@@ -474,12 +398,6 @@ Based on the conversation above, determine if any tools should be called to fetc
           content: response.content,
         });
 
-        log.info({
-          responseLength: response.content.length,
-          toolsCalledCount: toolsCalled.length,
-          historyLength: this.conversationHistory.length,
-        }, 'MCP Agent completed with response');
-
         return {
           success: true,
           response: response.content,
@@ -487,14 +405,7 @@ Based on the conversation above, determine if any tools should be called to fetc
         };
       }
 
-      // No content and no tool calls - something went wrong
-      log.warn('LLM returned empty response');
       break;
-    }
-
-    // Reached max iterations
-    if (iterations >= MAX_TOOL_CALLS) {
-      log.warn({ iterations }, 'MCP Agent reached max tool call limit');
     }
 
     return {
@@ -517,14 +428,6 @@ Based on the conversation above, determine if any tools should be called to fetc
     // Get combined default + custom keywords
     const triggerKeywords = this.getCombinedTriggerKeywords();
 
-    log.info({
-      originalText: segment.text,
-      textLower: text,
-      channel: segment.channel,
-      textLength: text.length,
-      customKeywordCount: this.customTriggerKeywords.length,
-    }, 'MCP Agent: Checking trigger keywords');
-
     // Check if any trigger keywords are present
     const matchedKeywords: string[] = [];
     for (const keyword of triggerKeywords) {
@@ -534,20 +437,9 @@ Based on the conversation above, determine if any tools should be called to fetc
     }
 
     if (matchedKeywords.length > 0) {
-      log.info({
-        matchedKeywords,
-        matchCount: matchedKeywords.length,
-        text: segment.text.slice(0, 100),
-        channel: segment.channel,
-        isCustomKeyword: matchedKeywords.some(k => this.customTriggerKeywords.includes(k)),
-      }, 'MCP Agent: Trigger keyword(s) MATCHED');
       return true;
     }
 
-    log.debug({
-      text: segment.text.slice(0, 100),
-      checkedKeywordCount: triggerKeywords.length,
-    }, 'MCP Agent: No trigger keywords found');
     return false;
   }
 }
