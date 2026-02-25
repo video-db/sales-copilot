@@ -22,7 +22,7 @@ function TrpcProvider({ children, port }: { children: React.ReactNode; port: num
   );
 
   const [trpcClient] = useState(() =>
-    createTrpcClient(() => configStore.accessToken, port)
+    createTrpcClient(() => useConfigStore.getState().accessToken, port)
   );
 
   return (
