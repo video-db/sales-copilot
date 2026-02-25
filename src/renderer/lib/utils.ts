@@ -18,7 +18,14 @@ export function formatDuration(seconds: number): string {
 
 export function formatRelativeTime(date: Date | string): string {
   const now = new Date();
-  const then = new Date(date);
+  // SQLite datetime('now') returns UTC without timezone indicator (e.g., "2024-01-15 10:00:00")
+  // JavaScript interprets strings without 'Z' as local time, causing timezone offset issues
+  // Append 'Z' to indicate UTC if the string doesn't already have timezone info
+  let dateStr = typeof date === 'string' ? date : date.toISOString();
+  if (typeof date === 'string' && !date.endsWith('Z') && !date.includes('+') && !date.includes('-', 10)) {
+    dateStr = date.replace(' ', 'T') + 'Z';
+  }
+  const then = new Date(dateStr);
   const diffMs = now.getTime() - then.getTime();
   const diffSecs = Math.floor(diffMs / 1000);
   const diffMins = Math.floor(diffSecs / 60);
